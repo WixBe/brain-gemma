@@ -1,89 +1,205 @@
-# MedGemma Brain Tumor Analysis API
+# 🧠 BrainGemma
 
-## Overview
+> **AI-powered brain tumor diagnosis** — PathFoundation vision classifier + MedGemma clinical reasoning + React UI
 
-This project provides a **FastAPI** service that leverages a local **MedGemma** LLM together with the **Path Foundation** vision model to analyze brain MRI scans. The API accepts a text prompt and an optional MRI image, runs a classification tool to detect tumor type, and then asks MedGemma to generate a structured JSON diagnostic report (primary diagnosis, confidence, grade, location, differential diagnoses, recommendations, and triage urgency).
+---
 
-## Features
+## Architecture
 
-- Multimodal input: text + image (base64‑encoded) sent directly to MedGemma.
-- Automatic tumor classification via a TensorFlow feature extractor + PyTorch classification head.
-- Structured JSON output for easy downstream consumption.
-- Robust handling of tool‑call loops with a guard to prevent infinite recursion.
+```
+brain-gemma/
+├── app/                          ← FastAPI backend
+│   ├── main.py                   ← CORS + routers
+│   ├── api/
+│   │   ├── diagnose.py           ← POST /api/v1/diagnose  ← frontend calls this
+│   │   └── chat.py               ← POST /api/v1/chat      ← raw agent chat
+│   ├── services/
+│   │   ├── agent.py              ← LangGraph agentic loop (PathFoundation → MedGemma)
+│   │   ├── vision.py             ← TumorClassifierTool (TF + PyTorch head)
+│   │   └── response_adapter.py  ← MedGemma JSON → DiagnoseResponse schema
+│   └── core/config.py           ← pydantic-settings (reads .env)
+│
+├── path_foundation_model/        ← Google PathFoundation TF SavedModel
+├── brain_tumor_path_foundation_head.pth  ← Fine-tuned 4-class PyTorch head
+│
+├── frontend/                     ← React (Vite) UI
+│   ├── src/
+│   │   ├── api/mock.js           ← API client (real + mock mode)
+│   │   ├── components/           ← Header, Hero, Dropzone, Results, Pipeline
+│   │   ├── context/AppContext.jsx
+│   │   └── App.jsx
+│   ├── .env.local                ← VITE_API_BASE_URL, VITE_MOCK_MODE (gitignored)
+│   └── package.json
+│
+├── requirements.txt
+├── .env.example                  ← Copy to .env and fill in values
+└── README.md
+```
+
+---
+
+## Pipeline
+
+```
+Upload CT/MRI
+    │
+    ▼
+POST /api/v1/diagnose
+    │
+    ├─ Phase 1: PathFoundation TF → embeddings → PyTorch head
+    │           → "GLIOMA (Confidence: 94.2%)"
+    │
+    └─ Phase 2: MedGemma synthesis
+               image + Phase 1 result → JSON report
+               {primary_diagnosis, confidence, grade, location,
+                differential_diagnosis, recommendations, triage_urgency}
+                    │
+                    ▼
+              response_adapter.py  →  DiagnoseResponse
+                    │
+                    ▼
+              React ResultsSection renders report
+```
+
+---
 
 ## Quick Start
 
-```bash
-# 1. Clone the repository (if not already)
-git clone https://github.com/yourorg/medgemma-brain-gem
-cd medgemma-brain-gem
+### Prerequisites
+- Python 3.10+
+- Node.js 18+
+- [LM Studio](https://lmstudio.ai/) running MedGemma locally  
+  (or any OpenAI-compatible server at the URL in `.env`)
 
-# 2. Create a virtual environment and install dependencies
+### 1. Backend Setup
+
+```powershell
+cd brain-gemma
+
+# Create & activate virtual environment (always use venv)
 python -m venv .venv
-source .venv/bin/activate   # on Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+.venv\Scripts\activate          # Windows PowerShell
+# source .venv/bin/activate     # macOS / Linux
 
-# 3. Ensure the Path Foundation model files are present under `path_foundation_model/`
-#    (they are included in the repo).
+# Install PyTorch with CUDA 12.4 (from PyTorch index)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
-# 4. Start the FastAPI server
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# Install all other dependencies
+pip install fastapi uvicorn pydantic pydantic-settings python-multipart `
+            python-dotenv langchain langchain-core langchain-openai `
+            langgraph langgraph-prebuilt pillow tensorflow tf_keras numpy
+
+# Or install everything from requirements.txt (needs both indexes):
+pip install -r requirements.txt --index-url https://download.pytorch.org/whl/cu124 `
+            --extra-index-url https://pypi.org/simple
+
+# Configure environment
+cp .env.example .env
+# Edit .env: set LLM_BASE_URL to your LM Studio IP
+
+# Start the API server (using venv python)
+.venv\Scripts\python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The server will be reachable at `http://localhost:8000`.
+API will be live at: **http://localhost:8000**  
+Swagger docs: **http://localhost:8000/docs**
 
-## API Endpoint
-
-### `POST /api/v1/chat`
-
-**Form fields**
-- `message` – The user’s textual query.
-- `image` – (optional) An MRI scan file.
-
-**Response**
-```json
-{
-  "status": "success",
-  "response": "{ ... JSON diagnostic report ... }",
-  "image_processed": true
-}
-```
-
-## Example Curl Request
+### 2. Frontend Setup
 
 ```bash
-curl --location 'http://localhost:8000/api/v1/chat' \
-  --form 'message="Can you check this MRI scan and tell me if there\'s a tumor?"' \
-  --form 'image=@"/E:/Workspace/Hackathon/Medgemma/Dataset/ext-test-data/glioma.jpg"'
+cd brain-gemma/frontend
+
+# Install dependencies
+npm install
+
+# Configure environment (already set up — edit if needed)
+# VITE_API_BASE_URL=http://localhost:8000
+# VITE_MOCK_MODE=false
+
+# Start development server
+npm run dev
 ```
 
-The request will return a JSON diagnostic report similar to:
+Frontend will be live at: **http://localhost:5173**
 
+---
+
+## API Endpoints
+
+### `POST /api/v1/diagnose` ← Main endpoint (used by React frontend)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ct` | `File[]` | CT scan files (optional) |
+| `mri` | `File[]` | MRI scan files (optional) |
+| `context` | `string` | Optional clinical notes |
+
+**Response:** `DiagnoseResponse`
 ```json
 {
-  "primary_diagnosis": "GLIOMA",
-  "confidence": 0.76,
-  "grade": "III",
+  "diagnosis": "High-Grade Glioma",
+  "tumor_type": "Glioblastoma Multiforme (GBM)",
+  "grade": "WHO Grade IV",
+  "confidence": 94,
   "location": "Left Temporal Lobe",
-  "differential_diagnosis": {
-    "GLIOMA": 0.76,
-    "MENINGIOMA": 0.15,
-    "NO_TUMOR": 0.09
-  },
-  "recommendations": "Refer to neuro‑oncology for further evaluation.",
-  "triage_urgency": "high"
+  "modalities_used": ["MRI"],
+  "triage": "URGENT",
+  "findings": "...",
+  "recommendations": ["..."],
+  "differential": [{"label": "Glioma", "probability": 94}],
+  "inference_ms": 1240
 }
 ```
 
-## Configuration
+### `POST /api/v1/chat` ← Raw agent chat (for testing/debug)
 
-All configurable values live in `app/core/config.py`:
-- `PROJECT_NAME`
-- `LLM_BASE_URL` – URL of the local MedGemma server.
-- `LLM_MODEL`
-- `LLM_API_KEY`
-- `UPLOAD_DIR` – Directory where uploaded images are temporarily stored.
+| Field | Type | Description |
+|-------|------|-------------|
+| `message` | `string` | Text query |
+| `image` | `File` | Optional scan image |
+
+### `GET /health` or `GET /api/v1/health`
+Returns model load status and LLM connectivity.
+
+---
+
+## Configuration (`.env`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_BASE_URL` | `http://localhost:1234/v1` | LM Studio / OpenAI-compat server |
+| `LLM_MODEL` | `medgemma-1.5-4b-it` | Model name |
+| `LLM_API_KEY` | `lm-studio` | API key (any string for LM Studio) |
+| `UPLOAD_DIR` | `uploads` | Temp directory for uploaded scans |
+| `ENV` | `development` | `development` = open CORS; `production` = locked |
+| `PORT` | `8000` | Server port |
+
+---
+
+## Supported File Types
+
+`.jpg` · `.jpeg` · `.png` · `.dcm` · `.nii` · `.gz` · `.bmp` · `.tiff`
+
+---
+
+## Tumor Classes
+
+| PathFoundation class | Display | Triage |
+|---------------------|---------|--------|
+| `glioma` | High-Grade Glioma (GBM) | 🔴 URGENT |
+| `meningioma` | Meningioma | 🟡 SOON |
+| `pituitary` | Pituitary Adenoma | 🟡 SOON |
+| `notumor` | No Tumor Detected | 🟢 ROUTINE |
+
+---
+
+## ⚠️ Disclaimer
+
+This tool is for **research and demonstration purposes only**.  
+It is **NOT approved for clinical use**. Always consult a qualified medical professional.
+
+---
 
 ## License
 
-MIT License – see the `LICENSE` file for details.
+MIT

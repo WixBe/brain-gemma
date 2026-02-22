@@ -1,0 +1,35 @@
+/* ── Design Tokens ── */
+:root {
+    --c-obsidian: #0A0A0A;
+    --c-obsidian-80: #111111;
+    --c-obsidian-60: #1A1A1A;
+    --c-obsidian-40: #272727;
+    --c-teal: #00C2A8;
+    --c-teal-dim: rgba(0, 194, 168, 0.12);
+    --c-teal-mid: rgba(0, 194, 168, 0.3);
+    --c-white: #F0F0F0;
+    --c-white-60: rgba(240, 240, 240, 0.6);
+    --c-white-30: rgba(240, 240, 240, 0.2);
+    --c-white-10: rgba(240, 240, 240, 0.06);
+    --c-danger: #FF4545;
+    --c-warn: #F5A623;
+
+    --font-sans: 'Space Grotesk', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 16px;
+    --space-4: 24px;
+    --space-5: 32px;
+    --space-6: 48px;
+    --space-7: 64px;
+    --space-8: 80px;
+    --space-9: 120px;
+
+    --duration-fast: 120ms;
+    --duration-base: 240ms;
+    --duration-slow: 480ms;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+}
